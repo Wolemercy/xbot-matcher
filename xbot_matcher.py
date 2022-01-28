@@ -45,7 +45,9 @@ def get_candidates(cache, guild_id):
         print("Successfully returned list of candidates from cache")
         new_candidates = set()
         for candidate in candidates:
-            new_candidates.add(candidate.decode('utf-8'))
+            decoded_candidate = candidate.decode('utf-8')
+            if decoded_candidate != "":
+                new_candidates.add(decoded_candidate)
         return new_candidates
 
 def retrieve_previous_matches(cursor, guild_id):
