@@ -100,6 +100,11 @@ ENV/
 # mypy
 .mypy_cache/
 
+#psycopg
+awslambda-psycopg2/
+python/
+
 *.sqlite3
 
 xbotvenv
+

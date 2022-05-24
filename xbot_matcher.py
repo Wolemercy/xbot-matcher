@@ -8,13 +8,7 @@ load_dotenv()
 
 def get_db_connection():
     try:
-        conn =  psycopg2.connect(
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            host=os.getenv("DB_HOST"),
-            port=os.getenv("DB_PORT")
-        )
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"), sslmode=os.getenv("SSL_MODE"))
         print("Connection to database successful")
         return conn
     except:
@@ -25,7 +19,8 @@ def get_cache_connection():
     try:
         cache = redis.Redis(
             host=os.getenv("CACHE_HOST"),
-            port=os.getenv("CACHE_PORT"))
+            port=os.getenv("CACHE_PORT"),
+            password=os.getenv("CACHE_PASSWORD"))
         
         cache.get('')
         print("Connection to cache successful")
@@ -164,11 +159,17 @@ def update_next_match_date(conn, cursor, guild_id):
     # first, get next_match date
     select_statement = """SELECT "matchFrequency"
                             FROM "Match"
-                            WHERE "serverId" = %s
+                            WHERE "dGuildId" = %s
                         """
     select_data = guild_id
     cursor.execute(select_statement, (select_data,))
-    match_frequency = cursor.fetchone()[0]
+
+    result = cursor.fetchone()
+    if not result:
+        print("There is no match record for Guild {}".format(guild_id))
+        return 
+
+    match_frequency = result[0]
     match_frequency = datetime.timedelta(match_frequency)
     last_match_date = datetime.datetime.now()
     next_match_date = last_match_date + match_frequency
@@ -176,7 +177,7 @@ def update_next_match_date(conn, cursor, guild_id):
     # update last match date and next match date
     update_statement = """UPDATE "Match"
                             SET "lastMatchDate" = %s, "nextMatchDate" = %s
-                            WHERE "serverId" = %s
+                            WHERE "dGuildId" = %s
                         """
     update_data = (last_match_date, next_match_date, guild_id)
     cursor.execute(update_statement, update_data)
@@ -185,29 +186,37 @@ def update_next_match_date(conn, cursor, guild_id):
     print("The next match date has been saved to the database")
     return
 
+def delete_pool_from_cache(cache, guild_id):
+    cache_key = 'SUMPOOL-' + guild_id
+    cache.delete(cache_key)
+    print("Candidate pool removed from cache successfully")
+    return
+
 def send_response(guild_id):
     data = {
         "id": guild_id
     }
     url = os.getenv("MATCH_URL")
-    r = requests.post(url, data)
-    
-    if r.status_code == 200:
+
+    try:
+        r = requests.post(url, data, timeout=os.getenv("REQUEST_TIMEOUT"))
         print("Server has been notified of a successful set of matches", r.status_code)
-    else:
-        ("An error occured while notifying server of a successful set of matches", r.status_code)
+    except:
+        print("An error occured while notifying server of a successful set of matches")
     return
 
 
-def matcher():
+def matcher(guild_id):
+    print("Getting DB Connection")
     conn = get_db_connection()
+    
+    print("Getting Cache Connection")
     cache = get_cache_connection()
 
     if not conn or not cache:
         return
     
     cursor = conn.cursor()
-    guild_id = "931198576984469545"
     previous_matches = retrieve_previous_matches(cursor, guild_id)
 
     # # candidates should be a set; cache_key = SUMPOOL-${guild_id}
@@ -225,15 +234,16 @@ def matcher():
     # update next match date
     update_next_match_date(conn, cursor, guild_id)
 
+    # delete candidates pool from cache
+    delete_pool_from_cache(cache, guild_id)
+
     # send response to webhook
     send_response(guild_id)
-
 
     cursor.close()
     cache.close()
     return
 
 
-if __name__ == '__main__':
-
-    matcher()
+def call_matcher(guild_id):
+    matcher(guild_id)
